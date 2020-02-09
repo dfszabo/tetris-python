@@ -2,6 +2,7 @@ from tkinter import *
 from random import seed
 from random import randint
 import time
+import copy
 
 # seed random number generator
 seed(1)
@@ -25,9 +26,6 @@ ticks = 0
 
 colors = ["black", "blue", "orange", "green", "yellow", "red", "purple", "brown"]
 
-gameSpaceBOT = [0] * HEIGHT
-for i in range(HEIGHT):
-    gameSpaceBOT[i] = [0] * WIDTH
 
 tetrominos = [
     [[0, 1, 0, 0],
@@ -127,28 +125,49 @@ def spawnNewPiece(gameSpace):
     global current_y
     current_y = 0
     global current_rotation
-    current_rotation = randint(0, 3)
+    current_rotation = 0
     global current_piece
     current_piece = randint(0, 6)
 
     return doesItFit(current_piece, current_rotation, current_x, current_y, gameSpace)
 
+# calculating the "goodness" or fitness of the gameSpace
 def calculateFitness(gameSpace):
     lineFillednessFactor = 0
     lineSolved = 0
+    holes = 1
+    maxHeight = 1
 
+    # calculating highest solid block
+    for y in range(WIDTH):
+        for x in range(HEIGHT - 1, 0, -1):
+            if gameSpace[x][y] != 0 and maxHeight < x:
+                maxHeight = x + 1
+
+    # calculating how filled the lines are from the left to right also
+    # if there is any solved line(s) (line fully filled with blocks)
     for x in range(HEIGHT):
         currentRowFilledness = 0
         for y in range(WIDTH):
             if gameSpace[x][y] != 0:
-                currentRowFilledness = currentRowFilledness + 1
+                currentRowFilledness += 1
         if currentRowFilledness == WIDTH:
             lineSolved += 1
-        lineFillednessFactor += currentRowFilledness * (x + 1)
-    return lineFillednessFactor + 10000 * lineSolved
+        lineFillednessFactor += currentRowFilledness * (x + 5)
+
+    # calculating holes in the gamespace
+    for y in range(WIDTH):
+        hasColumnAnySolidBlock = False
+        for x in range(HEIGHT):
+            if hasColumnAnySolidBlock == False and gameSpace[x][y] != 0:
+                hasColumnAnySolidBlock = True
+            if hasColumnAnySolidBlock and gameSpace[x][y] == 0:
+                holes += 10
+
+    #return int((100000 + (100 * lineFillednessFactor - (maxHeight ** 3 / 1000))) / (holes ** 3)) << lineSolved ** 3
+    return int((1000 * lineFillednessFactor) / (holes * (maxHeight ** 2))) << lineSolved
 
 def bot(gameSpace):
-    global gameSpaceBOT
     global current_rotation
     global current_x
     local_y = current_y
@@ -156,26 +175,22 @@ def bot(gameSpace):
     target_rot = current_rotation
     bestFitness = -1
 
-    for x in range(HEIGHT):
-        for y in range(WIDTH):
-            gameSpaceBOT[x][y] = gameSpace[x][y]
-
     for rot in range(4):
         for x in range(WIDTH + 3):
             if doesItFit(current_piece, rot, x - 3 , local_y, gameSpace) == 1:
                 # moving down until it stucks
                 while doesItFit(current_piece, rot, x - 3 , local_y + 1, gameSpace) == 1:
-                    local_y = local_y + 1
+                    local_y += 1
                 # fitting the piece into the BOTs gameSpace
                 for px in range(4):
                     for py in range(4):
                         idx = rotatedIndex(rot, px * 4 + py)
                         if tetrominos[current_piece][int(idx / 4)][idx % 4] == 1:
-                            gameSpaceBOT[local_y + px][x - 3 + py] = current_piece + 1
+                            gameSpace[local_y + px][x - 3 + py] = current_piece + 1
                 # if the resulting gamespace fitness is better then the current best one
                 # then change the target coordinates for the best solution to the current one
-                if calculateFitness(gameSpaceBOT) > bestFitness:
-                    bestFitness = calculateFitness(gameSpaceBOT)
+                if calculateFitness(gameSpace) > bestFitness:
+                    bestFitness = calculateFitness(gameSpace)
                     target_x = x - 3
                     target_rot = rot
                 # removing the piece for the next iteration
@@ -183,41 +198,42 @@ def bot(gameSpace):
                     for py in range(4):
                         idx = rotatedIndex(rot, px * 4 + py)
                         if tetrominos[current_piece][int(idx / 4)][idx % 4] == 1:
-                            gameSpaceBOT[local_y + px][x - 3 + py] = 0
+                            gameSpace[local_y + px][x - 3 + py] = 0
     # depending on our current position move the current piece towards the target
     # first do the rotation
     ### print('target_rot={:d}, target_x={:d}'.format(target_rot, target_x))
     if target_rot != current_rotation:
         if target_rot > current_rotation:
-            current_rotation = current_rotation + 1
+            current_rotation += 1
         else:
-            current_rotation = current_rotation - 1
+            current_rotation -= 1
     # if rotation is correct than move it horrizontally
     elif target_x != current_x:
         if target_x > current_x:
-            current_x = current_x + 1
+            current_x += 1
         else:
-            current_x = current_x - 1
+            current_x -= 1
 
 def checkAndRemoveFilledLines(gameSpace):
     global scores
     first_found_line_y_coord = 0
     found_lines = 0
+
     for x in range(HEIGHT):
         num_of_blocks_in_row = 0
         for y in range(WIDTH):
             if gameSpace[x][y] != 0:
-                num_of_blocks_in_row = num_of_blocks_in_row + 1
+                num_of_blocks_in_row += 1
         if num_of_blocks_in_row == WIDTH:
-            found_lines = found_lines + 1
+            found_lines += 1
             if first_found_line_y_coord == 0:
                 first_found_line_y_coord = x
     # if there was filled lines then add to score and erase the lines
     if found_lines != 0:
         scores += 10
-        for x in range(first_found_line_y_coord + found_lines - 1, 0, -1):
+        for x in range(first_found_line_y_coord + found_lines - 1, found_lines, -1):
             ### print("x is {:d}".format(x))
-            gameSpace[x] = gameSpace[x - found_lines]
+            gameSpace[x] = copy.deepcopy(gameSpace[x - found_lines])
 
 def update(C, squares_list, gameSpace):
     global ticks
@@ -230,22 +246,26 @@ def update(C, squares_list, gameSpace):
     if ticks == 0:
         # if it able to move down than move it down
         if doesItFit(current_piece, current_rotation, current_x, current_y + 1, gameSpace) == 1:
-            current_y = current_y + 1
+            current_y += 1
         else:
-            if current_y == 8 and current_piece == 5 and current_x == 5:
-                print("hey")
             scores += 1
+            print("scores: {:d}".format(scores))
             for x in range(4):
                 for y in range(4):
                     idx = rotatedIndex(current_rotation, x * 4 + y)
                     if tetrominos[current_piece][int(idx / 4)][idx % 4] != 0:
+                        if current_y + x >= HEIGHT or current_x + y >= WIDTH:
+                            while 1:
+                                print("current_rotation={:d}, idx={:d}".format(current_rotation, idx))
+                                print("y={:d}, x={:d}".format(current_y + x, current_x + y))
+                                time.sleep(1)
+                                print("dafaq")
                         gameSpace[current_y + x][current_x + y] = current_piece + 1
             checkAndRemoveFilledLines(gameSpace)
             if not spawnNewPiece(gameSpace):
-                print("Masaka?!")
                 return 0
-    drawGamespace(C, squares_list, gameSpace)
-    C.after(1, update, C, squares_list, gameSpace)
+    return 1
+    #C.after(1, update, C, squares_list, gameSpace)
 
 def main():
     # canvasd
@@ -270,8 +290,10 @@ def main():
                                 (y + 1) * BLOCK_SIZE,
                                 fill=colors[gameSpace[y][x]]))
 
-    update(C, squares_list, gameSpace)
-    root.mainloop()
+    while update(C, squares_list, gameSpace):
+        drawGamespace(C, squares_list, gameSpace)
+        root.update_idletasks()
+        root.update()
 
 if __name__ == "__main__":
     main()
